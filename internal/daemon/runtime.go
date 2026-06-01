@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	kitdaemon "go.kenn.io/kit/daemon"
+
 	"go.kenn.io/roborev/internal/config"
 )
 
@@ -20,9 +23,11 @@ const daemonServiceName = "roborev"
 // RuntimeInfo stores daemon runtime state
 type RuntimeInfo struct {
 	PID        int    `json:"pid"`
-	Addr       string `json:"addr"`
+	Addr       string `json:"addr,omitempty"`
+	Address    string `json:"address,omitempty"`
 	Port       int    `json:"port"`
 	Network    string `json:"network"`
+	Service    string `json:"service,omitempty"`
 	Version    string `json:"version"`
 	SourcePath string `json:"-"` // Path to the runtime file (not serialized, set by ListAllRuntimes)
 }
@@ -34,14 +39,66 @@ func (r RuntimeInfo) Endpoint() DaemonEndpoint {
 	if network == "" {
 		network = "tcp"
 	}
-	return DaemonEndpoint{Network: network, Address: r.Addr}
+	address := r.Addr
+	if address == "" {
+		address = r.Address
+	}
+	if path, ok := strings.CutPrefix(address, "unix://"); ok {
+		network = "unix"
+		address = path
+	}
+	return DaemonEndpoint{Network: network, Address: address}
 }
 
 // PingInfo is the minimal daemon identity payload used for liveness probes.
 type PingInfo struct {
+	OK      bool   `json:"ok,omitempty"`
 	Service string `json:"service"`
 	Version string `json:"version"`
 	PID     int    `json:"pid,omitempty"`
+}
+
+func runtimeStore() kitdaemon.RuntimeStore {
+	return kitdaemon.RuntimeStore{Dir: config.DataDir(), Prefix: "daemon"}
+}
+
+// RuntimeStore returns the shared kit runtime store used by roborev daemon
+// discovery and startup coordination.
+func RuntimeStore() kitdaemon.RuntimeStore {
+	return runtimeStore()
+}
+
+// DiscoverOptions returns the shared kit discovery options for roborev.
+func DiscoverOptions(timeout time.Duration) kitdaemon.DiscoverOptions {
+	return kitdaemon.DiscoverOptions{
+		Probe: kitdaemon.ProbeOptions{
+			ExpectedService: daemonServiceName,
+			Timeout:         timeout,
+		},
+	}
+}
+
+func runtimeInfoFromRecord(rec kitdaemon.RuntimeRecord) *RuntimeInfo {
+	ep := daemonEndpointFromKit(rec.Endpoint())
+	return &RuntimeInfo{
+		PID:        rec.PID,
+		Addr:       ep.Address,
+		Address:    ep.Address,
+		Port:       ep.Port(),
+		Network:    ep.Network,
+		Service:    rec.Service,
+		Version:    rec.Version,
+		SourcePath: rec.SourcePath,
+	}
+}
+
+func pingInfoFromKit(info kitdaemon.PingInfo) *PingInfo {
+	return &PingInfo{
+		OK:      info.OK,
+		Service: info.Service,
+		Version: info.Version,
+		PID:     info.PID,
+	}
 }
 
 // RuntimePath returns the path to the runtime info file for the current process
@@ -51,7 +108,11 @@ func RuntimePath() string {
 
 // RuntimePathForPID returns the path to the runtime info file for a specific PID
 func RuntimePathForPID(pid int) string {
-	return filepath.Join(config.DataDir(), fmt.Sprintf("daemon.%d.json", pid))
+	path, err := runtimeStore().Path(pid)
+	if err != nil {
+		return filepath.Join(config.DataDir(), fmt.Sprintf("daemon.%d.json", pid))
+	}
+	return path
 }
 
 // LegacyRuntimePath returns the old daemon.json path for migration
@@ -62,62 +123,9 @@ func LegacyRuntimePath() string {
 // WriteRuntime saves the daemon runtime info atomically.
 // Uses write-to-temp-then-rename to prevent readers from seeing partial writes.
 func WriteRuntime(ep DaemonEndpoint, version string) error {
-	info := RuntimeInfo{
-		PID:     os.Getpid(),
-		Addr:    ep.Address,
-		Port:    ep.Port(),
-		Network: ep.Network,
-		Version: version,
-	}
-
-	path := RuntimePath()
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(info, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	// Write to temp file first for atomic creation
-	tmpFile, err := os.CreateTemp(dir, "daemon.*.json.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmpFile.Name()
-
-	// Clean up temp file on any error
-	success := false
-	defer func() {
-		if !success {
-			os.Remove(tmpPath)
-		}
-	}()
-
-	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
-		return err
-	}
-	if err := tmpFile.Close(); err != nil {
-		return err
-	}
-
-	// Atomic rename to final path
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
-	}
-
-	// Set permissions to 0644 explicitly. This intentionally ignores umask
-	// because the runtime file must be readable by other processes (CLI commands
-	// discovering the daemon). The file contains only PID/port/version, not secrets.
-	if err := os.Chmod(path, 0o644); err != nil {
-		return err
-	}
-
-	success = true
-	return nil
+	rec := kitdaemon.NewRuntimeRecord(daemonServiceName, version, ep.kitEndpoint())
+	_, err := runtimeStore().Write(rec)
+	return err
 }
 
 // ReadRuntime reads the daemon runtime info for the current process
@@ -127,17 +135,7 @@ func ReadRuntime() (*RuntimeInfo, error) {
 
 // ReadRuntimeForPID reads the daemon runtime info for a specific PID
 func ReadRuntimeForPID(pid int) (*RuntimeInfo, error) {
-	data, err := os.ReadFile(RuntimePathForPID(pid))
-	if err != nil {
-		return nil, err
-	}
-
-	var info RuntimeInfo
-	if err := json.Unmarshal(data, &info); err != nil {
-		return nil, err
-	}
-
-	return &info, nil
+	return readRuntimeInfo(RuntimePathForPID(pid))
 }
 
 // RemoveRuntime removes the runtime info file for the current process
@@ -155,6 +153,25 @@ func RemoveRuntimeForPID(pid int) {
 // Continues scanning even if some files are unreadable (e.g., permission errors).
 func ListAllRuntimes() ([]*RuntimeInfo, error) {
 	dataDir := config.DataDir()
+	store := runtimeStore()
+
+	records, err := store.List()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var runtimes []*RuntimeInfo
+	seen := make(map[string]struct{}, len(records))
+	for _, rec := range records {
+		info := runtimeInfoFromRecord(rec)
+		runtimes = append(runtimes, info)
+		if rec.SourcePath != "" {
+			seen[rec.SourcePath] = struct{}{}
+		}
+	}
 
 	// Use os.ReadDir instead of filepath.Glob to handle paths with glob metacharacters
 	entries, err := os.ReadDir(dataDir)
@@ -185,35 +202,72 @@ func ListAllRuntimes() ([]*RuntimeInfo, error) {
 		}
 	}
 
-	var runtimes []*RuntimeInfo
 	for _, path := range matches {
-		data, err := os.ReadFile(path)
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		info, err := readRuntimeInfo(path)
 		if err != nil {
-			// Skip unreadable files (permission errors, file disappeared, etc.)
-			// Don't abort the whole scan - there may be other valid daemon files
+			if path == legacyPath {
+				os.Remove(path)
+			}
 			continue
 		}
-		var info RuntimeInfo
-		if err := json.Unmarshal(data, &info); err != nil {
-			// Corrupted file - remove it
-			os.Remove(path)
-			continue
-		}
-		// Validate required fields - remove invalid entries
-		if info.PID <= 0 || info.Addr == "" {
-			os.Remove(path)
-			continue
-		}
-		// Track source path for proper cleanup
-		info.SourcePath = path
-		runtimes = append(runtimes, &info)
+		runtimes = append(runtimes, info)
 	}
 	return runtimes, nil
+}
+
+func readRuntimeInfo(path string) (*RuntimeInfo, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var info RuntimeInfo
+	if err := json.Unmarshal(data, &info); err == nil {
+		if info.Addr == "" {
+			info.Addr = info.Address
+		}
+		if info.PID > 0 && info.Addr != "" {
+			ep := info.Endpoint()
+			info.Addr = ep.Address
+			info.Address = ep.Address
+			info.Network = ep.Network
+			info.Port = ep.Port()
+			info.SourcePath = path
+			return &info, nil
+		}
+	}
+
+	rec, err := runtimeStore().Read(path)
+	if err != nil {
+		return nil, err
+	}
+	if rec.PID <= 0 || rec.Endpoint().Address == "" {
+		return nil, fmt.Errorf("invalid daemon runtime record in %s", path)
+	}
+	info = *runtimeInfoFromRecord(rec)
+	info.SourcePath = path
+	return &info, nil
 }
 
 // GetAnyRunningDaemon returns info about a responsive daemon.
 // Returns os.ErrNotExist if no responsive daemon is found.
 func GetAnyRunningDaemon() (*RuntimeInfo, error) {
+	rec, _, ok, err := kitdaemon.Discover(context.Background(), runtimeStore(), kitdaemon.DiscoverOptions{
+		Probe: kitdaemon.ProbeOptions{
+			ExpectedService: daemonServiceName,
+			Timeout:         time.Second,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return runtimeInfoFromRecord(rec), nil
+	}
+
 	runtimes, err := ListAllRuntimes()
 	if err != nil {
 		return nil, err
@@ -238,6 +292,12 @@ func ProbeDaemon(ep DaemonEndpoint, timeout time.Duration) (*PingInfo, error) {
 	}
 	if !ep.IsUnix() && !isLoopbackAddr(ep.Address) {
 		return nil, fmt.Errorf("non-loopback daemon address: %s", ep.Address)
+	}
+	if info, err := kitdaemon.Probe(context.Background(), ep.kitEndpoint(), kitdaemon.ProbeOptions{
+		ExpectedService: daemonServiceName,
+		Timeout:         timeout,
+	}); err == nil {
+		return pingInfoFromKit(info), nil
 	}
 	client := ep.HTTPClient(timeout)
 	baseURL := ep.BaseURL()
@@ -284,6 +344,7 @@ func probeDaemonPing(client *http.Client, baseURL string) (*PingInfo, bool, erro
 		if info.Service != daemonServiceName {
 			return nil, false, fmt.Errorf("unexpected daemon service %q", info.Service)
 		}
+		info.OK = true
 		return &info, false, nil
 	case http.StatusNotFound, http.StatusMethodNotAllowed:
 		return nil, true, nil

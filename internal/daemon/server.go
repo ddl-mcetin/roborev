@@ -2341,6 +2341,7 @@ func (s *Server) humaPing(
 	ctx context.Context, input *struct{},
 ) (*PingOutput, error) {
 	return &PingOutput{Body: PingInfo{
+		OK:      true,
 		Service: daemonServiceName,
 		Version: version.Version,
 		PID:     os.Getpid(),
