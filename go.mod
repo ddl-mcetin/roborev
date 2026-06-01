@@ -28,7 +28,7 @@ require (
 	github.com/sourcegraph/go-diff v0.8.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
-	go.kenn.io/kit v0.1.0
+	go.kenn.io/kit v0.1.1-0.20260601234720-64f1195f19ac
 	golang.org/x/term v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.50.1
