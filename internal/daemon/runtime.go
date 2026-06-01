@@ -94,7 +94,11 @@ func RuntimePath() string {
 
 // RuntimePathForPID returns the path to the runtime info file for a specific PID
 func RuntimePathForPID(pid int) string {
-	return filepath.Join(config.DataDir(), fmt.Sprintf("daemon.%d.json", pid))
+	path, err := runtimeStore().Path(pid)
+	if err != nil {
+		return filepath.Join(config.DataDir(), fmt.Sprintf("daemon.%d.json", pid))
+	}
+	return path
 }
 
 // WriteRuntime saves the daemon runtime info atomically.
@@ -115,9 +119,6 @@ func ReadRuntimeForPID(pid int) (*RuntimeInfo, error) {
 	rec, err := runtimeStore().Read(RuntimePathForPID(pid))
 	if err != nil {
 		return nil, err
-	}
-	if rec.PID <= 0 || rec.Endpoint().Address == "" {
-		return nil, fmt.Errorf("invalid daemon runtime record in %s", RuntimePathForPID(pid))
 	}
 	return runtimeInfoFromRecord(rec), nil
 }
