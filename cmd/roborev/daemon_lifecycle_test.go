@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
@@ -15,107 +14,6 @@ import (
 	"go.kenn.io/roborev/internal/version"
 )
 
-func TestEnsureDaemonRestartsWhenLegacyProbeHasNoVersion(t *testing.T) {
-	t.Setenv("ROBOREV_SKIP_VERSION_CHECK", "")
-
-	tests := []struct {
-		name       string
-		statusCode int
-	}{
-		{name: "204 no content", statusCode: http.StatusNoContent},
-		{name: "500 server error", statusCode: http.StatusInternalServerError},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				switch r.URL.Path {
-				case "/api/ping":
-					w.WriteHeader(http.StatusNotFound)
-				case "/api/status":
-					w.WriteHeader(tt.statusCode)
-				default:
-					http.NotFound(w, r)
-				}
-			}))
-			defer server.Close()
-
-			origGetAnyRunningDaemon := getAnyRunningDaemon
-			origRestartDaemon := restartDaemonForEnsure
-			getAnyRunningDaemon = func() (*daemon.RuntimeInfo, error) {
-				return &daemon.RuntimeInfo{
-					PID:     1234,
-					Addr:    strings.TrimPrefix(server.URL, "http://"),
-					Version: "",
-				}, nil
-			}
-			restartCalls := 0
-			restartDaemonForEnsure = func() error {
-				restartCalls++
-				return nil
-			}
-			t.Cleanup(func() {
-				getAnyRunningDaemon = origGetAnyRunningDaemon
-				restartDaemonForEnsure = origRestartDaemon
-			})
-
-			if err := ensureDaemon(); err != nil {
-				require.NoError(t, err, "ensureDaemon returned error: %v")
-			}
-			assert.Equal(t, 1, restartCalls)
-		})
-	}
-}
-
-func TestEnsureDaemonRestartsWhenManualLegacyProbeHasNoVersion(t *testing.T) {
-	t.Setenv("ROBOREV_SKIP_VERSION_CHECK", "")
-
-	tests := []struct {
-		name       string
-		statusCode int
-	}{
-		{name: "204 no content", statusCode: http.StatusNoContent},
-		{name: "500 server error", statusCode: http.StatusInternalServerError},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				switch r.URL.Path {
-				case "/api/ping":
-					w.WriteHeader(http.StatusNotFound)
-				case "/api/status":
-					w.WriteHeader(tt.statusCode)
-				default:
-					http.NotFound(w, r)
-				}
-			}))
-			defer server.Close()
-
-			origGetAnyRunningDaemon := getAnyRunningDaemon
-			origRestartDaemon := restartDaemonForEnsure
-			getAnyRunningDaemon = func() (*daemon.RuntimeInfo, error) {
-				return nil, os.ErrNotExist
-			}
-			patchServerAddr(t, server.URL)
-			restartCalls := 0
-			restartDaemonForEnsure = func() error {
-				restartCalls++
-				return nil
-			}
-			t.Cleanup(func() {
-				getAnyRunningDaemon = origGetAnyRunningDaemon
-				restartDaemonForEnsure = origRestartDaemon
-			})
-
-			if err := ensureDaemon(); err != nil {
-				require.NoError(t, err, "ensureDaemon returned error: %v")
-			}
-			assert.Equal(t, 1, restartCalls)
-		})
-	}
-}
-
 func TestEnsureDaemonPrefersLiveDaemonVersionOverRuntimeMetadata(t *testing.T) {
 	t.Setenv("ROBOREV_SKIP_VERSION_CHECK", "")
 
@@ -123,6 +21,7 @@ func TestEnsureDaemonPrefersLiveDaemonVersionOverRuntimeMetadata(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/ping":
 			_ = json.NewEncoder(w).Encode(daemon.PingInfo{
+				OK:      true,
 				Service: "roborev",
 				Version: "v-other-daemon",
 			})
@@ -137,7 +36,7 @@ func TestEnsureDaemonPrefersLiveDaemonVersionOverRuntimeMetadata(t *testing.T) {
 	getAnyRunningDaemon = func() (*daemon.RuntimeInfo, error) {
 		return &daemon.RuntimeInfo{
 			PID:     1234,
-			Addr:    strings.TrimPrefix(server.URL, "http://"),
+			Address: strings.TrimPrefix(server.URL, "http://"),
 			Version: version.Version,
 		}, nil
 	}
@@ -165,7 +64,7 @@ func TestEnsureDaemonRestartsWhenLiveProbeFailsDespiteRuntimeVersion(t *testing.
 	getAnyRunningDaemon = func() (*daemon.RuntimeInfo, error) {
 		return &daemon.RuntimeInfo{
 			PID:     1234,
-			Addr:    "127.0.0.1:1",
+			Address: "127.0.0.1:1",
 			Version: version.Version,
 		}, nil
 	}

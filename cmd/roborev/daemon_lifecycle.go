@@ -200,8 +200,8 @@ func ensureDaemon() error {
 		return nil
 	}
 
-	// Try the configured default address for manual/legacy daemon runs that do
-	// not have a runtime file yet.
+	// Try the configured default address for manual daemon runs that do not
+	// have a runtime file yet.
 	ep := getDaemonEndpoint()
 	if probe, err := daemon.ProbeDaemon(ep, 2*time.Second); err == nil {
 		if !skipVersionCheck {

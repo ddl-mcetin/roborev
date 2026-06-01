@@ -172,10 +172,9 @@ func NewMockDaemon(t *testing.T, hooks MockRefineHooks) *MockDaemon {
 
 	require.NoError(t, os.MkdirAll(tmpDir, 0o755), "failed to create data dir")
 	mockAddr := ts.URL[7:] // strip "http://"
-	daemonInfo := daemon.RuntimeInfo{Addr: mockAddr, PID: os.Getpid(), Version: version.Version}
-	data, err := json.Marshal(daemonInfo)
-	require.NoError(t, err, "failed to marshal daemon.json")
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "daemon.json"), data, 0o644), "failed to write daemon.json")
+	require.NoError(t,
+		daemon.WriteRuntime(daemon.DaemonEndpoint{Network: "tcp", Address: mockAddr}, version.Version),
+		"failed to write daemon runtime")
 
 	origServerAddr := serverAddr
 	origGetAnyRunningDaemon := getAnyRunningDaemon
@@ -288,6 +287,7 @@ func (state *mockRefineState) handlePing(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	_ = json.NewEncoder(w).Encode(daemon.PingInfo{
+		OK:      true,
 		Service: "roborev",
 		Version: version.Version,
 		PID:     os.Getpid(),

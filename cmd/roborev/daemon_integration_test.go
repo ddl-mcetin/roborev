@@ -124,7 +124,7 @@ func setupTestDaemon(t *testing.T) (string, string) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 	configPath := filepath.Join(tmpDir, "config.toml")
 
-	// Isolate runtime dir to avoid writing to real ~/.roborev/daemon.json
+	// Isolate runtime dir to avoid writing to the real daemon runtime store.
 	t.Setenv("ROBOREV_DATA_DIR", tmpDir)
 
 	// Write minimal config

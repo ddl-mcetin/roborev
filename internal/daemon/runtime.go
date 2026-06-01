@@ -2,13 +2,10 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -23,36 +20,27 @@ const daemonServiceName = "roborev"
 // RuntimeInfo stores daemon runtime state
 type RuntimeInfo struct {
 	PID        int    `json:"pid"`
-	Addr       string `json:"addr,omitempty"`
-	Address    string `json:"address,omitempty"`
-	Port       int    `json:"port"`
-	Network    string `json:"network"`
+	Network    string `json:"network,omitempty"`
+	Address    string `json:"address"`
 	Service    string `json:"service,omitempty"`
-	Version    string `json:"version"`
+	Version    string `json:"version,omitempty"`
 	SourcePath string `json:"-"` // Path to the runtime file (not serialized, set by ListAllRuntimes)
 }
 
-// Endpoint returns a DaemonEndpoint for this runtime. An empty Network defaults to "tcp"
-// for backwards compatibility with old runtime files that predate the Network field.
+// Endpoint returns a DaemonEndpoint for this runtime.
 func (r RuntimeInfo) Endpoint() DaemonEndpoint {
-	network := r.Network
-	if network == "" {
-		network = "tcp"
-	}
-	address := r.Addr
-	if address == "" {
-		address = r.Address
-	}
-	if path, ok := strings.CutPrefix(address, "unix://"); ok {
-		network = "unix"
-		address = path
-	}
-	return DaemonEndpoint{Network: network, Address: address}
+	return daemonEndpointFromKit(kitdaemon.RuntimeRecord{
+		PID:     r.PID,
+		Network: r.Network,
+		Address: r.Address,
+		Service: r.Service,
+		Version: r.Version,
+	}.Endpoint())
 }
 
 // PingInfo is the minimal daemon identity payload used for liveness probes.
 type PingInfo struct {
-	OK      bool   `json:"ok,omitempty"`
+	OK      bool   `json:"ok"`
 	Service string `json:"service"`
 	Version string `json:"version"`
 	PID     int    `json:"pid,omitempty"`
@@ -82,10 +70,8 @@ func runtimeInfoFromRecord(rec kitdaemon.RuntimeRecord) *RuntimeInfo {
 	ep := daemonEndpointFromKit(rec.Endpoint())
 	return &RuntimeInfo{
 		PID:        rec.PID,
-		Addr:       ep.Address,
-		Address:    ep.Address,
-		Port:       ep.Port(),
 		Network:    ep.Network,
+		Address:    ep.Address,
 		Service:    rec.Service,
 		Version:    rec.Version,
 		SourcePath: rec.SourcePath,
@@ -108,16 +94,7 @@ func RuntimePath() string {
 
 // RuntimePathForPID returns the path to the runtime info file for a specific PID
 func RuntimePathForPID(pid int) string {
-	path, err := runtimeStore().Path(pid)
-	if err != nil {
-		return filepath.Join(config.DataDir(), fmt.Sprintf("daemon.%d.json", pid))
-	}
-	return path
-}
-
-// LegacyRuntimePath returns the old daemon.json path for migration
-func LegacyRuntimePath() string {
-	return filepath.Join(config.DataDir(), "daemon.json")
+	return filepath.Join(config.DataDir(), fmt.Sprintf("daemon.%d.json", pid))
 }
 
 // WriteRuntime saves the daemon runtime info atomically.
@@ -135,7 +112,14 @@ func ReadRuntime() (*RuntimeInfo, error) {
 
 // ReadRuntimeForPID reads the daemon runtime info for a specific PID
 func ReadRuntimeForPID(pid int) (*RuntimeInfo, error) {
-	return readRuntimeInfo(RuntimePathForPID(pid))
+	rec, err := runtimeStore().Read(RuntimePathForPID(pid))
+	if err != nil {
+		return nil, err
+	}
+	if rec.PID <= 0 || rec.Endpoint().Address == "" {
+		return nil, fmt.Errorf("invalid daemon runtime record in %s", RuntimePathForPID(pid))
+	}
+	return runtimeInfoFromRecord(rec), nil
 }
 
 // RemoveRuntime removes the runtime info file for the current process
@@ -152,10 +136,7 @@ func RemoveRuntimeForPID(pid int) {
 // Sets SourcePath on each RuntimeInfo for proper cleanup.
 // Continues scanning even if some files are unreadable (e.g., permission errors).
 func ListAllRuntimes() ([]*RuntimeInfo, error) {
-	dataDir := config.DataDir()
-	store := runtimeStore()
-
-	records, err := store.List()
+	records, err := runtimeStore().List()
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -163,93 +144,11 @@ func ListAllRuntimes() ([]*RuntimeInfo, error) {
 		return nil, err
 	}
 
-	var runtimes []*RuntimeInfo
-	seen := make(map[string]struct{}, len(records))
+	runtimes := make([]*RuntimeInfo, 0, len(records))
 	for _, rec := range records {
-		info := runtimeInfoFromRecord(rec)
-		runtimes = append(runtimes, info)
-		if rec.SourcePath != "" {
-			seen[rec.SourcePath] = struct{}{}
-		}
-	}
-
-	// Use os.ReadDir instead of filepath.Glob to handle paths with glob metacharacters
-	entries, err := os.ReadDir(dataDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil // No data dir yet, no runtimes
-		}
-		return nil, err
-	}
-
-	// Filter for daemon.*.json files
-	var matches []string
-	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasPrefix(name, "daemon.") && strings.HasSuffix(name, ".json") {
-			matches = append(matches, filepath.Join(dataDir, name))
-		}
-	}
-
-	// Also check for legacy daemon.json (already covered by the pattern above,
-	// but keep explicit check for clarity)
-	legacyPath := LegacyRuntimePath()
-	if _, err := os.Stat(legacyPath); err == nil {
-		// Check if already in matches (daemon.json matches daemon.*.json pattern)
-		found := slices.Contains(matches, legacyPath)
-		if !found {
-			matches = append(matches, legacyPath)
-		}
-	}
-
-	for _, path := range matches {
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		info, err := readRuntimeInfo(path)
-		if err != nil {
-			if path == legacyPath {
-				os.Remove(path)
-			}
-			continue
-		}
-		runtimes = append(runtimes, info)
+		runtimes = append(runtimes, runtimeInfoFromRecord(rec))
 	}
 	return runtimes, nil
-}
-
-func readRuntimeInfo(path string) (*RuntimeInfo, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	var info RuntimeInfo
-	if err := json.Unmarshal(data, &info); err == nil {
-		if info.Addr == "" {
-			info.Addr = info.Address
-		}
-		if info.PID > 0 && info.Addr != "" {
-			ep := info.Endpoint()
-			info.Addr = ep.Address
-			info.Address = ep.Address
-			info.Network = ep.Network
-			info.Port = ep.Port()
-			info.SourcePath = path
-			return &info, nil
-		}
-	}
-
-	rec, err := runtimeStore().Read(path)
-	if err != nil {
-		return nil, err
-	}
-	if rec.PID <= 0 || rec.Endpoint().Address == "" {
-		return nil, fmt.Errorf("invalid daemon runtime record in %s", path)
-	}
-	info = *runtimeInfoFromRecord(rec)
-	info.SourcePath = path
-	return &info, nil
 }
 
 // GetAnyRunningDaemon returns info about a responsive daemon.
@@ -268,24 +167,10 @@ func GetAnyRunningDaemon() (*RuntimeInfo, error) {
 		return runtimeInfoFromRecord(rec), nil
 	}
 
-	runtimes, err := ListAllRuntimes()
-	if err != nil {
-		return nil, err
-	}
-
-	// Only return a daemon that's actually responding
-	for _, info := range runtimes {
-		if IsDaemonAlive(info.Endpoint()) {
-			return info, nil
-		}
-	}
-
 	return nil, os.ErrNotExist
 }
 
 // ProbeDaemon validates that a daemon endpoint is serving the roborev daemon.
-// It prefers the lightweight /api/ping endpoint and falls back to /api/status
-// for older daemon versions that do not implement /api/ping yet.
 func ProbeDaemon(ep DaemonEndpoint, timeout time.Duration) (*PingInfo, error) {
 	if ep.Address == "" {
 		return nil, fmt.Errorf("empty daemon address")
@@ -293,18 +178,14 @@ func ProbeDaemon(ep DaemonEndpoint, timeout time.Duration) (*PingInfo, error) {
 	if !ep.IsUnix() && !isLoopbackAddr(ep.Address) {
 		return nil, fmt.Errorf("non-loopback daemon address: %s", ep.Address)
 	}
-	if info, err := kitdaemon.Probe(context.Background(), ep.kitEndpoint(), kitdaemon.ProbeOptions{
+	info, err := kitdaemon.Probe(context.Background(), ep.kitEndpoint(), kitdaemon.ProbeOptions{
 		ExpectedService: daemonServiceName,
 		Timeout:         timeout,
-	}); err == nil {
-		return pingInfoFromKit(info), nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	client := ep.HTTPClient(timeout)
-	baseURL := ep.BaseURL()
-	if info, shouldFallback, err := probeDaemonPing(client, baseURL); !shouldFallback {
-		return info, err
-	}
-	return probeLegacyDaemonStatus(client, baseURL)
+	return pingInfoFromKit(info), nil
 }
 
 // IsDaemonAlive checks if a daemon at the given endpoint is actually responding.
@@ -326,64 +207,6 @@ func IsDaemonAlive(ep DaemonEndpoint) bool {
 		}
 	}
 	return false
-}
-
-func probeDaemonPing(client *http.Client, baseURL string) (*PingInfo, bool, error) {
-	resp, err := client.Get(baseURL + "/api/ping")
-	if err != nil {
-		return nil, false, err
-	}
-	defer resp.Body.Close()
-
-	switch resp.StatusCode {
-	case http.StatusOK:
-		var info PingInfo
-		if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-			return nil, false, fmt.Errorf("decode daemon ping: %w", err)
-		}
-		if info.Service != daemonServiceName {
-			return nil, false, fmt.Errorf("unexpected daemon service %q", info.Service)
-		}
-		info.OK = true
-		return &info, false, nil
-	case http.StatusNotFound, http.StatusMethodNotAllowed:
-		return nil, true, nil
-	default:
-		return nil, false, fmt.Errorf("daemon ping returned %d", resp.StatusCode)
-	}
-}
-
-func probeLegacyDaemonStatus(client *http.Client, baseURL string) (*PingInfo, error) {
-	resp, err := client.Get(baseURL + "/api/status")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 500 && resp.StatusCode < 600 {
-		return &PingInfo{Service: daemonServiceName}, nil
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("daemon status returned %d", resp.StatusCode)
-	}
-	if resp.StatusCode == http.StatusNoContent {
-		return &PingInfo{Service: daemonServiceName}, nil
-	}
-
-	var status struct {
-		Version string `json:"version"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		return nil, fmt.Errorf("decode daemon status: %w", err)
-	}
-	if status.Version == "" {
-		return nil, fmt.Errorf("daemon status missing version")
-	}
-
-	return &PingInfo{
-		Service: daemonServiceName,
-		Version: status.Version,
-	}, nil
 }
 
 func parseDaemonBindAddr(addr string) (string, int, error) {
@@ -545,25 +368,6 @@ func CleanupZombieDaemons(target DaemonEndpoint) int {
 			cleaned++
 		} else if KillDaemon(info) {
 			cleaned++
-		}
-	}
-
-	// Clean up legacy daemon.json - it may contain stale info
-	// that ListAllRuntimes picked up
-	legacyPath := LegacyRuntimePath()
-	if _, err := os.Stat(legacyPath); err == nil {
-		// Read it to check if it's for a dead daemon
-		if data, err := os.ReadFile(legacyPath); err == nil {
-			var info RuntimeInfo
-			if json.Unmarshal(data, &info) == nil {
-				if !IsDaemonAlive(info.Endpoint()) {
-					// Legacy file points to dead daemon, remove it
-					os.Remove(legacyPath)
-				}
-			} else {
-				// Corrupted, remove it
-				os.Remove(legacyPath)
-			}
 		}
 	}
 
