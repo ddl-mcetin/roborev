@@ -245,13 +245,15 @@ func TestListAllRuntimesSkipsUnreadableFiles(t *testing.T) {
 		t.Skip("chmod 0000 doesn't block reads on Windows")
 	}
 
-	dataDir := testenv.SetDataDir(t)
+	_ = testenv.SetDataDir(t)
+	runtimeDir := runtimeStore().Dir
+	require.NoError(t, os.MkdirAll(runtimeDir, 0o700))
 
 	// Create a valid runtime file
-	createRuntimeFile(t, dataDir, math.MaxInt32, nil)
+	createRuntimeFile(t, runtimeDir, math.MaxInt32, nil)
 
 	// Create an unreadable runtime file
-	unreadablePath := createRuntimeFile(t, dataDir, math.MaxInt32-1, &runtimeData{
+	unreadablePath := createRuntimeFile(t, runtimeDir, math.MaxInt32-1, &runtimeData{
 		PID:     math.MaxInt32 - 1,
 		Address: "127.0.0.1:7374",
 	})
@@ -424,7 +426,7 @@ func TestCleanupZombieDaemonsPreservesTargetSocket(t *testing.T) {
 		t.Skip("Unix sockets not supported on Windows")
 	}
 
-	dataDir := testenv.SetDataDir(t)
+	_ = testenv.SetDataDir(t)
 	assert := assert.New(t)
 
 	// Create a real Unix socket as the "target" (stands in for the
@@ -452,8 +454,10 @@ func TestCleanupZombieDaemonsPreservesTargetSocket(t *testing.T) {
 		"version": "stale",
 	})
 	require.NoError(t, err)
+	runtimeDir := runtimeStore().Dir
+	require.NoError(t, os.MkdirAll(runtimeDir, 0o700))
 	runtimePath := filepath.Join(
-		dataDir, fmt.Sprintf("daemon.%d.json", stalePID))
+		runtimeDir, fmt.Sprintf("daemon.%d.json", stalePID))
 	require.NoError(t, os.WriteFile(runtimePath, runtimeJSON, 0o644))
 
 	mockIdentifyProcess(t, func(pid int) processIdentity {
@@ -501,9 +505,11 @@ func TestListAllRuntimesWithGlobMetacharacters(t *testing.T) {
 
 	// Set ROBOREV_DATA_DIR to the directory with metacharacters
 	t.Setenv("ROBOREV_DATA_DIR", dataDir)
+	runtimeDir := runtimeStore().Dir
+	require.NoError(t, os.MkdirAll(runtimeDir, 0o700))
 
 	// Create a valid runtime file
-	createRuntimeFile(t, dataDir, math.MaxInt32, nil)
+	createRuntimeFile(t, runtimeDir, math.MaxInt32, nil)
 
 	// ListAllRuntimes should work despite glob metacharacters in path
 	runtimes, err := ListAllRuntimes()

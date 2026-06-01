@@ -500,23 +500,23 @@ func daemonFromHandler(t *testing.T, handler http.Handler) *MockDaemon {
 	})
 }
 
-// removeAllDaemonFiles removes all daemon runtime files from the data
+// removeAllDaemonFiles removes all daemon runtime files from the runtime
 // directory. Tests use this to simulate daemon death: once the runtime
 // files are gone, getDaemonEndpoint falls back to the serverAddr global,
 // which can be pointed at a dead address.
 func removeAllDaemonFiles(t *testing.T) {
 	t.Helper()
-	dataDir := os.Getenv("ROBOREV_DATA_DIR")
-	if dataDir == "" {
+	runtimeDir := daemon.RuntimeStore().Dir
+	if runtimeDir == "" {
 		return
 	}
-	entries, err := os.ReadDir(dataDir)
+	entries, err := os.ReadDir(runtimeDir)
 	if err != nil {
 		return
 	}
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), "daemon.") && strings.HasSuffix(e.Name(), ".json") {
-			os.Remove(filepath.Join(dataDir, e.Name()))
+			os.Remove(filepath.Join(runtimeDir, e.Name()))
 		}
 	}
 }

@@ -47,7 +47,10 @@ type PingInfo struct {
 }
 
 func runtimeStore() kitdaemon.RuntimeStore {
-	return kitdaemon.RuntimeStore{Dir: config.DataDir(), Prefix: "daemon"}
+	return kitdaemon.RuntimeStore{
+		Dir:    filepath.Join(config.DataDir(), "runtime"),
+		Prefix: "daemon",
+	}
 }
 
 // RuntimeStore returns the shared kit runtime store used by roborev daemon
@@ -96,7 +99,7 @@ func RuntimePath() string {
 func RuntimePathForPID(pid int) string {
 	path, err := runtimeStore().Path(pid)
 	if err != nil {
-		return filepath.Join(config.DataDir(), fmt.Sprintf("daemon.%d.json", pid))
+		return filepath.Join(config.DataDir(), "runtime", fmt.Sprintf("daemon.%d.json", pid))
 	}
 	return path
 }
