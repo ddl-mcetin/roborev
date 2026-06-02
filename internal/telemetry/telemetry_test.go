@@ -76,7 +76,7 @@ func TestReporterCaptureUsesAnonymousDistinctID(t *testing.T) {
 		enabled:    true,
 	}
 
-	err := reporter.Capture("daemon_started", map[string]any{
+	err := reporter.Capture(EventDaemonStarted, map[string]any{
 		"$geoip_disable": false,
 		"distinct_id":    "user-provided",
 		"repo":           "owner/name",
@@ -88,7 +88,7 @@ func TestReporterCaptureUsesAnonymousDistinctID(t *testing.T) {
 	capture, ok := client.message.(posthog.Capture)
 	require.True(ok)
 	assert.Equal("anonymous-install-id", capture.DistinctId)
-	assert.Equal("daemon_started", capture.Event)
+	assert.Equal(EventDaemonStarted, capture.Event)
 	assert.Equal(3, capture.Properties["repo_count"])
 	assert.Equal(true, capture.Properties["sync_enabled"])
 	assert.NotContains(capture.Properties, "distinct_id")
@@ -110,6 +110,30 @@ func TestReporterCaptureRejectsUnsupportedEvents(t *testing.T) {
 	require.ErrorIs(err, ErrUnsupportedEvent)
 }
 
+func TestReporterCaptureAllowsDailyActiveEvent(t *testing.T) {
+	assert := assert.New(t)
+	require := require.New(t)
+
+	client := &fakePostHogClient{}
+	reporter := &Reporter{
+		client:     client,
+		distinctID: "anonymous-install-id",
+		enabled:    true,
+	}
+
+	err := reporter.Capture(EventDaemonActiveDaily, map[string]any{
+		"repo_count":   3,
+		"sync_enabled": true,
+	})
+	require.NoError(err)
+
+	capture, ok := client.message.(posthog.Capture)
+	require.True(ok)
+	assert.Equal(EventDaemonActiveDaily, capture.Event)
+	assert.Equal(3, capture.Properties["repo_count"])
+	assert.Equal(true, capture.Properties["sync_enabled"])
+}
+
 func TestReporterCaptureDropsUnsafePropertyValues(t *testing.T) {
 	assert := assert.New(t)
 	require := require.New(t)
@@ -121,7 +145,7 @@ func TestReporterCaptureDropsUnsafePropertyValues(t *testing.T) {
 		enabled:    true,
 	}
 
-	err := reporter.Capture("daemon_started", map[string]any{
+	err := reporter.Capture(EventDaemonStarted, map[string]any{
 		"repo_count":   "owner/repo",
 		"sync_enabled": "yes",
 	})

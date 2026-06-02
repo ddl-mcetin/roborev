@@ -24,6 +24,9 @@ const (
 	installIDMetadataKey = "telemetry.install_id"
 	postHogAPIKey        = "phc_AzHd9YvuHR7M5poKzC6eW654d3SgKyBdoQPuwkWhimUf"
 	postHogEndpoint      = "https://us.i.posthog.com"
+
+	EventDaemonStarted     = "daemon_started"
+	EventDaemonActiveDaily = "daemon_active_daily"
 )
 
 var ErrUnsupportedEvent = errors.New("unsupported telemetry event")
@@ -31,7 +34,14 @@ var ErrUnsupportedEvent = errors.New("unsupported telemetry event")
 type propertyFilter func(any) (any, bool)
 
 var allowedEvents = map[string]map[string]propertyFilter{
-	"daemon_started": {
+	EventDaemonStarted: {
+		"repo_count":          safeTelemetryNumber,
+		"worker_count":        safeTelemetryNumber,
+		"sync_enabled":        safeTelemetryBool,
+		"ci_enabled":          safeTelemetryBool,
+		"auto_design_enabled": safeTelemetryBool,
+	},
+	EventDaemonActiveDaily: {
 		"repo_count":          safeTelemetryNumber,
 		"worker_count":        safeTelemetryNumber,
 		"sync_enabled":        safeTelemetryBool,

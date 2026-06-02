@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,13 +12,13 @@ import (
 
 type fakeTelemetryClient struct {
 	enabled    bool
-	event      string
-	properties map[string]any
+	events     []string
+	properties []map[string]any
 }
 
 func (f *fakeTelemetryClient) Capture(event string, properties map[string]any) error {
-	f.event = event
-	f.properties = properties
+	f.events = append(f.events, event)
+	f.properties = append(f.properties, properties)
 	return nil
 }
 
@@ -44,12 +45,36 @@ func TestCaptureDaemonStartedTelemetry(t *testing.T) {
 
 	server.captureDaemonStartedTelemetry(cfg)
 
-	assert.Equal("daemon_started", client.event)
-	assert.Equal(1, client.properties["repo_count"])
-	assert.Equal(4, client.properties["worker_count"])
-	assert.Equal(true, client.properties["sync_enabled"])
-	assert.Equal(true, client.properties["ci_enabled"])
-	assert.Equal(true, client.properties["auto_design_enabled"])
+	require.Len(client.events, 1)
+	require.Len(client.properties, 1)
+	assert.Equal("daemon_started", client.events[0])
+	assert.Equal(1, client.properties[0]["repo_count"])
+	assert.Equal(4, client.properties[0]["worker_count"])
+	assert.Equal(true, client.properties[0]["sync_enabled"])
+	assert.Equal(true, client.properties[0]["ci_enabled"])
+	assert.Equal(true, client.properties[0]["auto_design_enabled"])
+}
+
+func TestStartDailyTelemetryLoopCapturesImmediately(t *testing.T) {
+	assert := assert.New(t)
+	require := require.New(t)
+
+	server, db, tmpDir := newTestServer(t)
+	client := &fakeTelemetryClient{enabled: true}
+	server.SetTelemetry(client)
+
+	_, err := db.GetOrCreateRepo(tmpDir)
+	require.NoError(err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	server.startDailyTelemetryLoop(ctx, config.DefaultConfig())
+
+	require.Len(client.events, 1)
+	require.Len(client.properties, 1)
+	assert.Equal("daemon_active_daily", client.events[0])
+	assert.Equal(1, client.properties[0]["repo_count"])
 }
 
 func TestCaptureDaemonStartedTelemetryDisabledNoops(t *testing.T) {
@@ -61,6 +86,6 @@ func TestCaptureDaemonStartedTelemetryDisabledNoops(t *testing.T) {
 
 	server.captureDaemonStartedTelemetry(config.DefaultConfig())
 
-	assert.Empty(client.event)
+	assert.Empty(client.events)
 	assert.Nil(client.properties)
 }
