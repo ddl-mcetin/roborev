@@ -28,6 +28,7 @@ import (
 	"go.kenn.io/roborev/internal/githook"
 	"go.kenn.io/roborev/internal/prompt"
 	"go.kenn.io/roborev/internal/storage"
+	"go.kenn.io/roborev/internal/telemetry"
 	"go.kenn.io/roborev/internal/version"
 )
 
@@ -43,6 +44,7 @@ type Server struct {
 	hookRunner      *HookRunner
 	errorLog        *ErrorLog
 	activityLog     *ActivityLog
+	telemetry       telemetry.Client
 	startTime       time.Time
 	endpointMu      sync.Mutex // protects endpoint (written by Start, read by Stop)
 	endpoint        DaemonEndpoint
@@ -262,6 +264,8 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := WriteRuntime(ep, version.Version); err != nil {
 		log.Printf("Warning: failed to write runtime info: %v", err)
 	}
+
+	s.captureDaemonStartedTelemetry(cfg)
 
 	// Notify systemd that the daemon is ready. No-op when not running
 	// under systemd (NOTIFY_SOCKET is unset).
@@ -539,6 +543,38 @@ func (s *Server) ConfigWatcher() *ConfigWatcher {
 // Broadcaster returns the server's event broadcaster (for use by external components)
 func (s *Server) Broadcaster() Broadcaster {
 	return s.broadcaster
+}
+
+// SetTelemetry sets the anonymous telemetry client used for daemon lifecycle events.
+func (s *Server) SetTelemetry(client telemetry.Client) {
+	s.telemetry = client
+}
+
+func (s *Server) captureDaemonStartedTelemetry(cfg *config.Config) {
+	if s.telemetry == nil || !s.telemetry.Enabled() {
+		return
+	}
+
+	repoCount := 0
+	if repos, err := s.db.ListRepos(); err != nil {
+		log.Printf("Warning: failed to count repos for telemetry: %v", err)
+	} else {
+		repoCount = len(repos)
+	}
+
+	props := map[string]any{
+		"repo_count": repoCount,
+	}
+	if cfg != nil {
+		props["worker_count"] = cfg.MaxWorkers
+		props["sync_enabled"] = cfg.Sync.Enabled
+		props["ci_enabled"] = cfg.CI.Enabled
+		props["auto_design_enabled"] = cfg.AutoDesignReview.Enabled
+	}
+
+	if err := s.telemetry.Capture("daemon_started", props); err != nil {
+		log.Printf("Warning: capture telemetry event: %v", err)
+	}
 }
 
 // SetSyncWorker sets the sync worker for triggering manual syncs
