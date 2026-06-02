@@ -594,7 +594,7 @@ func (s *Server) startDailyTelemetryLoop(ctx context.Context, cfg *config.Config
 }
 
 func (s *Server) captureDailyTelemetry(cfg *config.Config) {
-	s.captureTelemetryEvent(telemetry.EventDaemonActiveDaily, cfg)
+	s.captureTelemetryEvent(telemetry.EventDaemonActive, cfg)
 }
 
 func (s *Server) captureTelemetryEvent(event string, cfg *config.Config) {

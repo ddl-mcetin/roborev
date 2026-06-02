@@ -25,8 +25,8 @@ const (
 	postHogAPIKey        = "phc_AzHd9YvuHR7M5poKzC6eW654d3SgKyBdoQPuwkWhimUf"
 	postHogEndpoint      = "https://us.i.posthog.com"
 
-	EventDaemonStarted     = "daemon_started"
-	EventDaemonActiveDaily = "daemon_active_daily"
+	EventDaemonStarted = "daemon_started"
+	EventDaemonActive  = "daemon_active"
 )
 
 var ErrUnsupportedEvent = errors.New("unsupported telemetry event")
@@ -41,7 +41,7 @@ var allowedEvents = map[string]map[string]propertyFilter{
 		"ci_enabled":          safeTelemetryBool,
 		"auto_design_enabled": safeTelemetryBool,
 	},
-	EventDaemonActiveDaily: {
+	EventDaemonActive: {
 		"repo_count":          safeTelemetryNumber,
 		"review_count":        safeTelemetryNumber,
 		"sync_enabled":        safeTelemetryBool,
@@ -59,6 +59,7 @@ type Client interface {
 type Reporter struct {
 	client     enqueueCloser
 	distinctID string
+	version    string
 	enabled    bool
 }
 
@@ -101,7 +102,12 @@ func SanitizeProperties(event string, properties map[string]any) (map[string]any
 			safeProperties[key] = safeValue
 		}
 	}
+	safeProperties["$process_person_profile"] = false
 	safeProperties["$geoip_disable"] = true
+	safeProperties["application"] = "roborev"
+	safeProperties["source"] = "daemon"
+	safeProperties["goos"] = runtime.GOOS
+	safeProperties["goarch"] = runtime.GOARCH
 	return safeProperties, nil
 }
 
@@ -123,12 +129,13 @@ func NewReporter(opts Options) (*Reporter, error) {
 		Endpoint:     postHogEndpoint,
 		DisableGeoIP: &disableGeoIP,
 		DefaultEventProperties: posthog.Properties{
-			"app":            "roborev",
-			"source":         "daemon",
-			"version":        opts.Version,
-			"goos":           runtime.GOOS,
-			"goarch":         runtime.GOARCH,
-			"$geoip_disable": true,
+			"application":             "roborev",
+			"source":                  "daemon",
+			"version":                 opts.Version,
+			"goos":                    runtime.GOOS,
+			"goarch":                  runtime.GOARCH,
+			"$process_person_profile": false,
+			"$geoip_disable":          true,
 		},
 	})
 	if err != nil {
@@ -138,6 +145,7 @@ func NewReporter(opts Options) (*Reporter, error) {
 	return &Reporter{
 		client:     client,
 		distinctID: distinctID,
+		version:    opts.Version,
 		enabled:    true,
 	}, nil
 }
@@ -173,6 +181,8 @@ func (r *Reporter) Capture(event string, properties map[string]any) error {
 	if err != nil {
 		return err
 	}
+
+	safeProperties["version"] = r.version
 
 	props := posthog.Properties{}
 	maps.Copy(props, safeProperties)

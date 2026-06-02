@@ -84,7 +84,7 @@ func TestStartDailyTelemetryLoopCapturesImmediately(t *testing.T) {
 
 	require.Len(client.events, 1)
 	require.Len(client.properties, 1)
-	assert.Equal("daemon_active_daily", client.events[0])
+	assert.Equal("daemon_active", client.events[0])
 	assert.Equal(1, client.properties[0]["repo_count"])
 }
 

@@ -73,16 +73,20 @@ func TestReporterCaptureUsesAnonymousDistinctID(t *testing.T) {
 	reporter := &Reporter{
 		client:     client,
 		distinctID: "anonymous-install-id",
+		version:    "test-version",
 		enabled:    true,
 	}
 
 	err := reporter.Capture(EventDaemonStarted, map[string]any{
-		"$geoip_disable": false,
-		"distinct_id":    "user-provided",
-		"repo":           "owner/name",
-		"repo_count":     3,
-		"review_count":   7,
-		"sync_enabled":   true,
+		"$process_person_profile": true,
+		"$geoip_disable":          false,
+		"application":             "caller-app",
+		"distinct_id":             "user-provided",
+		"repo":                    "owner/name",
+		"version":                 "caller-version",
+		"repo_count":              3,
+		"review_count":            7,
+		"sync_enabled":            true,
 	})
 	require.NoError(err)
 
@@ -95,6 +99,12 @@ func TestReporterCaptureUsesAnonymousDistinctID(t *testing.T) {
 	assert.Equal(true, capture.Properties["sync_enabled"])
 	assert.NotContains(capture.Properties, "distinct_id")
 	assert.NotContains(capture.Properties, "repo")
+	assert.Equal("roborev", capture.Properties["application"])
+	assert.Equal("test-version", capture.Properties["version"])
+	assert.Equal("daemon", capture.Properties["source"])
+	assert.NotEmpty(capture.Properties["goos"])
+	assert.NotEmpty(capture.Properties["goarch"])
+	assert.False(capture.Properties["$process_person_profile"].(bool))
 	assert.True(capture.Properties["$geoip_disable"].(bool))
 }
 
@@ -120,26 +130,38 @@ func TestReporterCaptureAllowsDailyActiveEvent(t *testing.T) {
 	reporter := &Reporter{
 		client:     client,
 		distinctID: "anonymous-install-id",
+		version:    "test-version",
 		enabled:    true,
 	}
 
-	err := reporter.Capture(EventDaemonActiveDaily, map[string]any{
-		"repo_count":    3,
-		"review_count":  7,
-		"sync_enabled":  true,
-		"worker_count":  4,
-		"unknown_count": 5,
+	err := reporter.Capture(EventDaemonActive, map[string]any{
+		"repo_count":              3,
+		"review_count":            7,
+		"sync_enabled":            true,
+		"worker_count":            4,
+		"unknown_count":           5,
+		"$process_person_profile": true,
+		"$geoip_disable":          false,
+		"application":             "caller-app",
+		"version":                 "caller-version",
 	})
 	require.NoError(err)
 
 	capture, ok := client.message.(posthog.Capture)
 	require.True(ok)
-	assert.Equal(EventDaemonActiveDaily, capture.Event)
+	assert.Equal(EventDaemonActive, capture.Event)
 	assert.Equal(3, capture.Properties["repo_count"])
 	assert.Equal(7, capture.Properties["review_count"])
 	assert.Equal(true, capture.Properties["sync_enabled"])
 	assert.NotContains(capture.Properties, "worker_count")
 	assert.NotContains(capture.Properties, "unknown_count")
+	assert.Equal("roborev", capture.Properties["application"])
+	assert.Equal("test-version", capture.Properties["version"])
+	assert.Equal("daemon", capture.Properties["source"])
+	assert.NotEmpty(capture.Properties["goos"])
+	assert.NotEmpty(capture.Properties["goarch"])
+	assert.False(capture.Properties["$process_person_profile"].(bool))
+	assert.True(capture.Properties["$geoip_disable"].(bool))
 }
 
 func TestReporterCaptureDropsUnsafePropertyValues(t *testing.T) {
@@ -150,14 +172,19 @@ func TestReporterCaptureDropsUnsafePropertyValues(t *testing.T) {
 	reporter := &Reporter{
 		client:     client,
 		distinctID: "anonymous-install-id",
+		version:    "test-version",
 		enabled:    true,
 	}
 
 	err := reporter.Capture(EventDaemonStarted, map[string]any{
-		"repo_count":   "owner/repo",
-		"review_count": "all of them",
-		"sync_enabled": "yes",
-		"worker_count": 4,
+		"repo_count":              "owner/repo",
+		"review_count":            "all of them",
+		"sync_enabled":            "yes",
+		"worker_count":            4,
+		"$process_person_profile": true,
+		"$geoip_disable":          false,
+		"application":             "caller-app",
+		"version":                 "caller-version",
 	})
 	require.NoError(err)
 
@@ -167,5 +194,8 @@ func TestReporterCaptureDropsUnsafePropertyValues(t *testing.T) {
 	assert.NotContains(capture.Properties, "review_count")
 	assert.NotContains(capture.Properties, "sync_enabled")
 	assert.NotContains(capture.Properties, "worker_count")
+	assert.Equal("roborev", capture.Properties["application"])
+	assert.Equal("test-version", capture.Properties["version"])
+	assert.False(capture.Properties["$process_person_profile"].(bool))
 	assert.True(capture.Properties["$geoip_disable"].(bool))
 }
