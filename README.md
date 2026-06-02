@@ -244,7 +244,7 @@ from the operator's shell).
 
 roborev sends limited anonymous telemetry to PostHog when the daemon starts
 and once every 24 hours while the daemon remains running: `daemon_started`
-and `daemon_active_daily` with repo count, worker count, sync enabled, CI
+and `daemon_active_daily` with repo count, review count, sync enabled, CI
 enabled, and auto-design enabled, plus version, OS/arch, and an anonymous
 install ID.
 It does not send repo names, paths, remotes, prompts, review output, provider

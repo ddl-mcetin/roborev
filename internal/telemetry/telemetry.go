@@ -36,14 +36,14 @@ type propertyFilter func(any) (any, bool)
 var allowedEvents = map[string]map[string]propertyFilter{
 	EventDaemonStarted: {
 		"repo_count":          safeTelemetryNumber,
-		"worker_count":        safeTelemetryNumber,
+		"review_count":        safeTelemetryNumber,
 		"sync_enabled":        safeTelemetryBool,
 		"ci_enabled":          safeTelemetryBool,
 		"auto_design_enabled": safeTelemetryBool,
 	},
 	EventDaemonActiveDaily: {
 		"repo_count":          safeTelemetryNumber,
-		"worker_count":        safeTelemetryNumber,
+		"review_count":        safeTelemetryNumber,
 		"sync_enabled":        safeTelemetryBool,
 		"ci_enabled":          safeTelemetryBool,
 		"auto_design_enabled": safeTelemetryBool,

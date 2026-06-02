@@ -45,6 +45,7 @@ type Server struct {
 	errorLog        *ErrorLog
 	activityLog     *ActivityLog
 	telemetry       telemetry.Client
+	telemetryOnce   sync.Once
 	telemetryStop   chan struct{}
 	startTime       time.Time
 	endpointMu      sync.Mutex // protects endpoint (written by Start, read by Stop)
@@ -567,23 +568,29 @@ func (s *Server) startDailyTelemetryLoop(ctx context.Context, cfg *config.Config
 		return
 	}
 
-	s.captureDailyTelemetry(cfg)
-
-	go func() {
-		ticker := time.NewTicker(dailyTelemetryInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-s.telemetryStop:
-				return
-			case <-ticker.C:
-				s.captureDailyTelemetry(cfg)
-			}
+	s.telemetryOnce.Do(func() {
+		if s.telemetry == nil || !s.telemetry.Enabled() {
+			return
 		}
-	}()
+
+		s.captureDailyTelemetry(cfg)
+
+		go func() {
+			ticker := time.NewTicker(dailyTelemetryInterval)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-s.telemetryStop:
+					return
+				case <-ticker.C:
+					s.captureDailyTelemetry(cfg)
+				}
+			}
+		}()
+	})
 }
 
 func (s *Server) captureDailyTelemetry(cfg *config.Config) {
@@ -608,12 +615,16 @@ func (s *Server) telemetryProperties(cfg *config.Config) map[string]any {
 	} else {
 		repoCount = len(repos)
 	}
+	reviewCount := 0
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM reviews`).Scan(&reviewCount); err != nil {
+		log.Printf("Warning: failed to count reviews for telemetry: %v", err)
+	}
 
 	props := map[string]any{
-		"repo_count": repoCount,
+		"repo_count":   repoCount,
+		"review_count": reviewCount,
 	}
 	if cfg != nil {
-		props["worker_count"] = cfg.MaxWorkers
 		props["sync_enabled"] = cfg.Sync.Enabled
 		props["ci_enabled"] = cfg.CI.Enabled
 		props["auto_design_enabled"] = cfg.AutoDesignReview.Enabled

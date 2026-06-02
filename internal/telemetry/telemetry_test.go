@@ -81,6 +81,7 @@ func TestReporterCaptureUsesAnonymousDistinctID(t *testing.T) {
 		"distinct_id":    "user-provided",
 		"repo":           "owner/name",
 		"repo_count":     3,
+		"review_count":   7,
 		"sync_enabled":   true,
 	})
 	require.NoError(err)
@@ -90,6 +91,7 @@ func TestReporterCaptureUsesAnonymousDistinctID(t *testing.T) {
 	assert.Equal("anonymous-install-id", capture.DistinctId)
 	assert.Equal(EventDaemonStarted, capture.Event)
 	assert.Equal(3, capture.Properties["repo_count"])
+	assert.Equal(7, capture.Properties["review_count"])
 	assert.Equal(true, capture.Properties["sync_enabled"])
 	assert.NotContains(capture.Properties, "distinct_id")
 	assert.NotContains(capture.Properties, "repo")
@@ -122,8 +124,11 @@ func TestReporterCaptureAllowsDailyActiveEvent(t *testing.T) {
 	}
 
 	err := reporter.Capture(EventDaemonActiveDaily, map[string]any{
-		"repo_count":   3,
-		"sync_enabled": true,
+		"repo_count":    3,
+		"review_count":  7,
+		"sync_enabled":  true,
+		"worker_count":  4,
+		"unknown_count": 5,
 	})
 	require.NoError(err)
 
@@ -131,7 +136,10 @@ func TestReporterCaptureAllowsDailyActiveEvent(t *testing.T) {
 	require.True(ok)
 	assert.Equal(EventDaemonActiveDaily, capture.Event)
 	assert.Equal(3, capture.Properties["repo_count"])
+	assert.Equal(7, capture.Properties["review_count"])
 	assert.Equal(true, capture.Properties["sync_enabled"])
+	assert.NotContains(capture.Properties, "worker_count")
+	assert.NotContains(capture.Properties, "unknown_count")
 }
 
 func TestReporterCaptureDropsUnsafePropertyValues(t *testing.T) {
@@ -147,13 +155,17 @@ func TestReporterCaptureDropsUnsafePropertyValues(t *testing.T) {
 
 	err := reporter.Capture(EventDaemonStarted, map[string]any{
 		"repo_count":   "owner/repo",
+		"review_count": "all of them",
 		"sync_enabled": "yes",
+		"worker_count": 4,
 	})
 	require.NoError(err)
 
 	capture, ok := client.message.(posthog.Capture)
 	require.True(ok)
 	assert.NotContains(capture.Properties, "repo_count")
+	assert.NotContains(capture.Properties, "review_count")
 	assert.NotContains(capture.Properties, "sync_enabled")
+	assert.NotContains(capture.Properties, "worker_count")
 	assert.True(capture.Properties["$geoip_disable"].(bool))
 }
