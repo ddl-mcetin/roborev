@@ -9,6 +9,7 @@ import (
 	"maps"
 	"math"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -112,6 +113,9 @@ func SanitizeProperties(event string, properties map[string]any) (map[string]any
 }
 
 func NewReporter(opts Options) (*Reporter, error) {
+	if runningInTestProcess() {
+		return DisabledReporter(), nil
+	}
 	if !EnabledFromEnv() {
 		return DisabledReporter(), nil
 	}
@@ -172,14 +176,26 @@ func (r *Reporter) Capture(event string, properties map[string]any) error {
 		return nil
 	}
 
+	capture, err := r.captureMessage(event, properties, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if runningInTestProcess() {
+		return nil
+	}
+
+	return r.client.Enqueue(capture)
+}
+
+func (r *Reporter) captureMessage(event string, properties map[string]any, timestamp time.Time) (posthog.Capture, error) {
 	event = strings.TrimSpace(event)
 	if event == "" {
-		return errors.New("telemetry event is required")
+		return posthog.Capture{}, errors.New("telemetry event is required")
 	}
 
 	safeProperties, err := SanitizeProperties(event, properties)
 	if err != nil {
-		return err
+		return posthog.Capture{}, err
 	}
 
 	safeProperties["version"] = r.version
@@ -187,12 +203,12 @@ func (r *Reporter) Capture(event string, properties map[string]any) error {
 	props := posthog.Properties{}
 	maps.Copy(props, safeProperties)
 
-	return r.client.Enqueue(posthog.Capture{
+	return posthog.Capture{
 		DistinctId: r.distinctID,
 		Event:      event,
-		Timestamp:  time.Now().UTC(),
+		Timestamp:  timestamp,
 		Properties: props,
-	})
+	}, nil
 }
 
 func (r *Reporter) Close() error {
@@ -236,4 +252,18 @@ func randomInstallID() (string, error) {
 		return "", fmt.Errorf("generate telemetry install id: %w", err)
 	}
 	return hex.EncodeToString(buf), nil
+}
+
+func runningInTestProcess() bool {
+	base := filepath.Base(os.Args[0])
+	if strings.HasSuffix(base, ".test") || strings.HasSuffix(base, ".test.exe") {
+		return true
+	}
+
+	for _, arg := range os.Args[1:] {
+		if strings.HasPrefix(arg, "-test.") || strings.HasPrefix(arg, "--test.") {
+			return true
+		}
+	}
+	return false
 }

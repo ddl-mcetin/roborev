@@ -250,7 +250,8 @@ enabled, and auto-design enabled, plus `application=roborev`, version, OS/arch,
 ID.
 It does not send repo names, paths, remotes, prompts, review output, provider
 tokens, usernames, or IP geolocation. Set `ROBOREV_TELEMETRY_ENABLED=0` to
-disable it. `TELEMETRY_ENABLED=0` is also honored.
+disable it. `TELEMETRY_ENABLED=0` is also honored. Telemetry is always disabled
+inside Go test processes, regardless of environment variables.
 
 ## Security Model
 

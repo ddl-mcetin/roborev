@@ -3,6 +3,7 @@ package telemetry
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/posthog/posthog-go"
 	"github.com/stretchr/testify/assert"
@@ -46,6 +47,23 @@ func TestNewReporterDisabledByEnvDoesNotCreateInstallID(t *testing.T) {
 	assert.Empty(value)
 }
 
+func TestNewReporterDisabledInTestProcessEvenWhenEnvEnablesTelemetry(t *testing.T) {
+	assert := assert.New(t)
+	require := require.New(t)
+
+	t.Setenv(EnabledEnv, "1")
+	t.Setenv(GenericEnabledEnv, "1")
+	database := openTestDB(t)
+
+	reporter, err := NewReporter(Options{Database: database})
+	require.NoError(err)
+
+	assert.False(reporter.Enabled())
+	value, err := database.GetSyncState(installIDMetadataKey)
+	require.NoError(err)
+	assert.Empty(value)
+}
+
 func TestLoadOrCreateInstallIDIsStableAndAnonymous(t *testing.T) {
 	assert := assert.New(t)
 	require := require.New(t)
@@ -69,15 +87,13 @@ func TestReporterCaptureUsesAnonymousDistinctID(t *testing.T) {
 	assert := assert.New(t)
 	require := require.New(t)
 
-	client := &fakePostHogClient{}
 	reporter := &Reporter{
-		client:     client,
 		distinctID: "anonymous-install-id",
 		version:    "test-version",
 		enabled:    true,
 	}
 
-	err := reporter.Capture(EventDaemonStarted, map[string]any{
+	capture, err := reporter.captureMessage(EventDaemonStarted, map[string]any{
 		"$process_person_profile": true,
 		"$geoip_disable":          false,
 		"application":             "caller-app",
@@ -87,11 +103,9 @@ func TestReporterCaptureUsesAnonymousDistinctID(t *testing.T) {
 		"repo_count":              3,
 		"review_count":            7,
 		"sync_enabled":            true,
-	})
+	}, time.Now().UTC())
 	require.NoError(err)
 
-	capture, ok := client.message.(posthog.Capture)
-	require.True(ok)
 	assert.Equal("anonymous-install-id", capture.DistinctId)
 	assert.Equal(EventDaemonStarted, capture.Event)
 	assert.Equal(3, capture.Properties["repo_count"])
@@ -122,7 +136,7 @@ func TestReporterCaptureRejectsUnsupportedEvents(t *testing.T) {
 	require.ErrorIs(err, ErrUnsupportedEvent)
 }
 
-func TestReporterCaptureAllowsDailyActiveEvent(t *testing.T) {
+func TestReporterCaptureDoesNotEnqueueInTestProcess(t *testing.T) {
 	assert := assert.New(t)
 	require := require.New(t)
 
@@ -134,7 +148,22 @@ func TestReporterCaptureAllowsDailyActiveEvent(t *testing.T) {
 		enabled:    true,
 	}
 
-	err := reporter.Capture(EventDaemonActive, map[string]any{
+	err := reporter.Capture(EventDaemonActive, map[string]any{"repo_count": 1})
+	require.NoError(err)
+	assert.Nil(client.message)
+}
+
+func TestReporterCaptureAllowsDaemonActiveEvent(t *testing.T) {
+	assert := assert.New(t)
+	require := require.New(t)
+
+	reporter := &Reporter{
+		distinctID: "anonymous-install-id",
+		version:    "test-version",
+		enabled:    true,
+	}
+
+	capture, err := reporter.captureMessage(EventDaemonActive, map[string]any{
 		"repo_count":              3,
 		"review_count":            7,
 		"sync_enabled":            true,
@@ -144,11 +173,9 @@ func TestReporterCaptureAllowsDailyActiveEvent(t *testing.T) {
 		"$geoip_disable":          false,
 		"application":             "caller-app",
 		"version":                 "caller-version",
-	})
+	}, time.Now().UTC())
 	require.NoError(err)
 
-	capture, ok := client.message.(posthog.Capture)
-	require.True(ok)
 	assert.Equal(EventDaemonActive, capture.Event)
 	assert.Equal(3, capture.Properties["repo_count"])
 	assert.Equal(7, capture.Properties["review_count"])
@@ -168,15 +195,13 @@ func TestReporterCaptureDropsUnsafePropertyValues(t *testing.T) {
 	assert := assert.New(t)
 	require := require.New(t)
 
-	client := &fakePostHogClient{}
 	reporter := &Reporter{
-		client:     client,
 		distinctID: "anonymous-install-id",
 		version:    "test-version",
 		enabled:    true,
 	}
 
-	err := reporter.Capture(EventDaemonStarted, map[string]any{
+	capture, err := reporter.captureMessage(EventDaemonStarted, map[string]any{
 		"repo_count":              "owner/repo",
 		"review_count":            "all of them",
 		"sync_enabled":            "yes",
@@ -185,11 +210,9 @@ func TestReporterCaptureDropsUnsafePropertyValues(t *testing.T) {
 		"$geoip_disable":          false,
 		"application":             "caller-app",
 		"version":                 "caller-version",
-	})
+	}, time.Now().UTC())
 	require.NoError(err)
 
-	capture, ok := client.message.(posthog.Capture)
-	require.True(ok)
 	assert.NotContains(capture.Properties, "repo_count")
 	assert.NotContains(capture.Properties, "review_count")
 	assert.NotContains(capture.Properties, "sync_enabled")
