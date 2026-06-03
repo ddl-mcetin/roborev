@@ -20,7 +20,7 @@
 
             src = ./.;
 
-            vendorHash = "sha256-bDsGW3Ko4miSdVuAIwprcXMiBPulD5/vVWBpnRvf+Hc=";
+            vendorHash = "sha256-7UrX1SJjVW+T/NRUWSCoQ4KLPKGayLQO0/3qsN67exs=";
 
             subPackages = [ "cmd/roborev" ];
 
