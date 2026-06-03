@@ -9,9 +9,9 @@ import (
 	"maps"
 	"math"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/posthog/posthog-go"
@@ -255,15 +255,5 @@ func randomInstallID() (string, error) {
 }
 
 func runningInTestProcess() bool {
-	base := filepath.Base(os.Args[0])
-	if strings.HasSuffix(base, ".test") || strings.HasSuffix(base, ".test.exe") {
-		return true
-	}
-
-	for _, arg := range os.Args[1:] {
-		if strings.HasPrefix(arg, "-test.") || strings.HasPrefix(arg, "--test.") {
-			return true
-		}
-	}
-	return false
+	return testing.Testing()
 }
