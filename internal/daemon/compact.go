@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"go.kenn.io/roborev/internal/config"
@@ -74,5 +75,68 @@ func IsValidCompactOutput(output string) bool {
 		}
 	}
 
-	return true
+	return !reportsRemainingFindingsWithoutDetails(output)
+}
+
+var compactFileLinePattern = regexp.MustCompile(`(?i)\b[\w./-]+\.(go|py|js|ts|tsx|jsx|java|rb|rs|c|cc|cpp|h|hpp|cs|php|swift|kt|m|mm|sql|yaml|yml|json|toml|md):\d+\b`)
+
+func reportsRemainingFindingsWithoutDetails(output string) bool {
+	lower := strings.ToLower(output)
+	if reportsNoRemainingFindings(lower) {
+		return false
+	}
+	if !mentionsRemainingFindings(lower) {
+		return false
+	}
+	return !hasActionableCompactFinding(output, lower)
+}
+
+func reportsNoRemainingFindings(lower string) bool {
+	noRemainingPhrases := []string{
+		"all previous findings have been addressed",
+		"all findings have been resolved",
+		"no issues found",
+		"no verified findings remain",
+		"no findings remain",
+		"no remaining findings",
+		"0 verified findings",
+		"zero verified findings",
+	}
+	for _, phrase := range noRemainingPhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+func mentionsRemainingFindings(lower string) bool {
+	remainingPhrases := []string{
+		"findings remain",
+		"finding remains",
+		"verified findings",
+		"verified finding",
+		"verdict: fail",
+	}
+	for _, phrase := range remainingPhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasActionableCompactFinding(output, lower string) bool {
+	if compactFileLinePattern.MatchString(output) {
+		return true
+	}
+
+	if strings.Contains(lower, "## review findings") {
+		return true
+	}
+
+	return strings.Contains(lower, "**severity**:") &&
+		(strings.Contains(lower, "**location**:") ||
+			strings.Contains(lower, "**problem**:") ||
+			strings.Contains(lower, "**fix**:"))
 }
