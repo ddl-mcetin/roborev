@@ -147,6 +147,15 @@ Done. All 6 reviews have been verified against the current codebase: 4 previousl
 - **Fix**: Reject compact output that says findings remain without listing them.`,
 			true,
 		},
+		{
+			"review_findings_header_with_remaining_count_only",
+			`Verdict: Fail
+
+## Review Findings
+
+5 verified findings remain.`,
+			false,
+		},
 		{"empty", "", false},
 		{"whitespace", "   \n  ", false},
 		{"error_prefix", "Error: something broke", false},

@@ -131,10 +131,6 @@ func hasActionableCompactFinding(output, lower string) bool {
 		return true
 	}
 
-	if strings.Contains(lower, "## review findings") {
-		return true
-	}
-
 	return strings.Contains(lower, "**severity**:") &&
 		(strings.Contains(lower, "**location**:") ||
 			strings.Contains(lower, "**problem**:") ||
