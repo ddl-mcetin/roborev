@@ -156,6 +156,13 @@ Done. All 6 reviews have been verified against the current codebase: 4 previousl
 5 verified findings remain.`,
 			false,
 		},
+		{
+			"ten_verified_findings_without_details",
+			`Verdict: Fail
+
+10 verified findings remain.`,
+			false,
+		},
 		{"empty", "", false},
 		{"whitespace", "   \n  ", false},
 		{"error_prefix", "Error: something broke", false},

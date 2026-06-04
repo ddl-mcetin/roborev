@@ -78,7 +78,10 @@ func IsValidCompactOutput(output string) bool {
 	return !reportsRemainingFindingsWithoutDetails(output)
 }
 
-var compactFileLinePattern = regexp.MustCompile(`(?i)\b[\w./-]+\.(go|py|js|ts|tsx|jsx|java|rb|rs|c|cc|cpp|h|hpp|cs|php|swift|kt|m|mm|sql|yaml|yml|json|toml|md):\d+\b`)
+var (
+	compactFileLinePattern            = regexp.MustCompile(`(?i)\b[\w./-]+\.(go|py|js|ts|tsx|jsx|java|rb|rs|c|cc|cpp|h|hpp|cs|php|swift|kt|m|mm|sql|yaml|yml|json|toml|md):\d+\b`)
+	compactZeroVerifiedFindingsPhrase = regexp.MustCompile(`\b0 verified findings\b`)
+)
 
 func reportsRemainingFindingsWithoutDetails(output string) bool {
 	lower := strings.ToLower(output)
@@ -99,7 +102,6 @@ func reportsNoRemainingFindings(lower string) bool {
 		"no verified findings remain",
 		"no findings remain",
 		"no remaining findings",
-		"0 verified findings",
 		"zero verified findings",
 	}
 	for _, phrase := range noRemainingPhrases {
@@ -107,7 +109,7 @@ func reportsNoRemainingFindings(lower string) bool {
 			return true
 		}
 	}
-	return false
+	return compactZeroVerifiedFindingsPhrase.MatchString(lower)
 }
 
 func mentionsRemainingFindings(lower string) bool {
