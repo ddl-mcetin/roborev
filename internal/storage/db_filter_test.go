@@ -510,6 +510,43 @@ func TestListJobsAndGetJobByIDReturnAgentic(t *testing.T) {
 	})
 }
 
+// TestListJobsHydratesOutputPrefix guards the column added to ListJobs so the
+// queue listing carries OutputPrefix. Consumers (notably the TUI agent picker)
+// rely on it to forward panel-member prefixing on re-run; an earlier version
+// of this query silently dropped the field.
+func TestListJobsHydratesOutputPrefix(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	repoPath := filepath.Join(t.TempDir(), "output-prefix-repo")
+	repo, err := db.GetOrCreateRepo(repoPath)
+	require.NoError(t, err, "GetOrCreateRepo failed: %v")
+
+	const prefix = "[panel-member-3] "
+	job, err := db.EnqueueJob(EnqueueOpts{
+		RepoID:       repo.ID,
+		Agent:        "test-agent",
+		Prompt:       "Review this code",
+		OutputPrefix: prefix,
+	})
+	require.NoError(t, err, "EnqueueJob failed: %v")
+	require.Equal(t, prefix, job.OutputPrefix, "post-enqueue job should reflect requested OutputPrefix")
+
+	jobs, err := db.ListJobs("", "", 50, 0)
+	require.NoError(t, err, "ListJobs failed: %v")
+
+	var found bool
+	for _, j := range jobs {
+		if j.ID == job.ID {
+			found = true
+			assert.Equal(t, prefix, j.OutputPrefix,
+				"ListJobs must hydrate OutputPrefix; otherwise downstream re-enqueues lose it")
+			break
+		}
+	}
+	assert.True(t, found, "ListJobs should return the enqueued job")
+}
+
 func TestListReposWithReviewCountsByBranch(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()

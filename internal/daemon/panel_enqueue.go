@@ -233,6 +233,7 @@ func (s *Server) descriptorForDirty(
 		diffContent:       in.req.DiffContent,
 		minSeverity:       in.normalizedMinSev,
 		worktreePath:      in.worktreePath,
+		outputPrefix:      in.req.OutputPrefix,
 		requestedModel:    in.requestedModel,
 		requestedProvider: in.requestedProvider,
 	}, nil
@@ -280,6 +281,7 @@ func (s *Server) descriptorForRange(
 		sessionSHA:        endSHA,
 		minSeverity:       in.normalizedMinSev,
 		worktreePath:      in.worktreePath,
+		outputPrefix:      in.req.OutputPrefix,
 		requestedModel:    in.requestedModel,
 		requestedProvider: in.requestedProvider,
 	}, nil
@@ -358,6 +360,7 @@ func (s *Server) descriptorForSingleCommit(
 		patchID:           git.GetPatchID(in.checkoutRoot, sha),
 		minSeverity:       in.normalizedMinSev,
 		worktreePath:      in.worktreePath,
+		outputPrefix:      in.req.OutputPrefix,
 		requestedModel:    in.requestedModel,
 		requestedProvider: in.requestedProvider,
 		commitSubject:     commit.Subject,

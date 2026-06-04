@@ -251,3 +251,10 @@ func applyAgentConfigOverrides(a Agent, cfg *config.Config) Agent {
 func installHintAgentNames() []string {
 	return slices.Clone(fallbackAgentOrder)
 }
+
+// KnownAgentNames returns the canonical names of all built-in review agents
+// in fallback-rank order. The list excludes runtime-only entries (acp, test)
+// and is suitable for user-facing menus.
+func KnownAgentNames() []string {
+	return slices.Clone(fallbackAgentOrder)
+}

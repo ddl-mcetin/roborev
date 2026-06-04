@@ -100,6 +100,7 @@ func (m model) queueHelpRows() [][]helpItem {
 	row1 := []helpItem{
 		{"x", "cancel"},
 		{"r", "rerun"},
+		{"A", "rerun agent"},
 		{"l", "log"},
 		{"p", "prompt"},
 		{"c", "comment"},

@@ -102,6 +102,8 @@ func (v viewKind) String() string {
 		return "patch"
 	case viewColumnOptions:
 		return "column-options"
+	case viewAgentPicker:
+		return "agent-picker"
 	default:
 		return "unknown"
 	}

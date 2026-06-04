@@ -29,6 +29,7 @@ const (
 	viewKindWorktreeConfirm // Confirm creating a worktree to apply patch
 	viewPatch               // Patch viewer for fix jobs
 	viewColumnOptions       // Column toggle modal
+	viewAgentPicker         // Pick a different agent to re-enqueue the highlighted review
 )
 
 // queuePrefetchBuffer is the number of extra rows to fetch beyond what's visible,

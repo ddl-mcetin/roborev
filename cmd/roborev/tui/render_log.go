@@ -291,6 +291,7 @@ func helpLines(tasksEnabled, noQuit bool) []string {
 				{"y", "Copy review to clipboard"},
 				{"x", "Cancel running/queued job"},
 				{"r", "Re-run completed/failed job"},
+				{"A", "Re-run with a different agent (opens picker)"},
 				{"o", "Column options (visibility, order, borders)"},
 				{"D", "Toggle distraction-free mode"},
 			},

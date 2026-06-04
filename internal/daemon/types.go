@@ -21,6 +21,7 @@ type EnqueueRequest struct {
 	MinSeverity  string `json:"min_severity,omitempty"`  // Minimum severity filter: critical, high, medium, low
 	Panel        string `json:"panel,omitempty"`         // Panel name; "none" forces single-agent
 	Source       string `json:"source,omitempty"`        // Provenance, e.g. "post_commit" (empty = foreground)
+	StrictAgent  bool   `json:"strict_agent,omitempty"`  // When true, fail with 400 if the requested Agent is unavailable or overridden, instead of silently falling back. Used by the TUI agent picker so users get told their pick wasn't honored.
 }
 
 // PanelEnqueueResponse is returned when an enqueue fans out into a panel run.

@@ -315,6 +315,15 @@ type model struct {
 	commentCommit   string   // Short commit SHA for display
 	commentFromView viewKind // View to return to after comment modal closes
 
+	// Agent picker modal state — opened with 'A' on a highlighted review job
+	agentPickerAgents   []string // Snapshot of agent names taken when the modal opens (sourced from agent.KnownAgentNames)
+	agentPickerIdx      int      // Selected agent index in agentPickerAgents
+	agentPickerJobID    int64    // Original job ID we're re-running with a different agent
+	agentPickerJobInfo  string   // Short human label (repo/sha/current-agent) shown in the modal header
+	agentPickerErr      string   // Most recent enqueue error (cleared on next open)
+	pendingEnqueueToken uint64   // Token for the most recent in-flight picker enqueue (0 = none). Used to disambiguate two submissions for the same job; per-submission rather than per-job so a late result from submission #1 can't masquerade as #2.
+	nextEnqueueToken    uint64   // Monotonic generator for pendingEnqueueToken. Bumped at confirm time; never wraps in practice.
+
 	// Active filter (applied to queue view)
 	activeRepoFilter   []string // Empty = show all, otherwise repo root_paths to filter by
 	autoRepoFilter     bool     // true when activeRepoFilter came from auto_filter_repo
@@ -879,6 +888,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		result, cmd = m.handleCancelResultMsg(msg)
 	case rerunResultMsg:
 		result, cmd = m.handleRerunResultMsg(msg)
+	case agentPickerEnqueueResultMsg:
+		result, cmd = m.handleAgentPickerEnqueueResultMsg(msg)
 	case repoNamesMsg:
 		result, cmd = m.handleRepoNamesMsg(msg)
 	case reposMsg:
@@ -984,6 +995,9 @@ func (m model) View() string {
 	}
 	if m.currentView == viewColumnOptions {
 		return m.renderColumnOptionsView()
+	}
+	if m.currentView == viewAgentPicker {
+		return m.renderAgentPickerView()
 	}
 	if m.currentView == viewKindPrompt && m.currentReview != nil {
 		return m.renderPromptView()

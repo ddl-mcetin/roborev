@@ -33,6 +33,8 @@ func (m model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePatchKey(msg)
 	case viewColumnOptions:
 		return m.handleColumnOptionsInput(msg)
+	case viewAgentPicker:
+		return m.handleAgentPickerKey(msg)
 	}
 
 	// Global keys shared across queue/review/prompt/commitMsg/help views
@@ -134,6 +136,8 @@ func (m model) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleCancelKey()
 	case "r":
 		return m.handleRerunKey()
+	case "A":
+		return m.handleAgentPickerOpenKey()
 	case "l", "t":
 		return m.handleLogKey2()
 	case "f":

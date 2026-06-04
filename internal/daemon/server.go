@@ -1716,6 +1716,20 @@ func (s *Server) resolveSingleAgent(
 		return "", "", out
 	}
 	agentName = resolved.Name()
+	if in.req.StrictAgent && in.req.Agent != "" {
+		// Catch both fallback-due-to-unavailability and workflow-config
+		// override. Canonicalize so aliases ("claude" → "claude-code") match.
+		if agent.CanonicalName(in.req.Agent) != agentName {
+			out, _ := rawJSONOutput(
+				http.StatusBadRequest,
+				ErrorResponse{Error: fmt.Sprintf(
+					"agent %q is unavailable or overridden by config; daemon would use %q instead. install the agent or pick a different one",
+					in.req.Agent, agentName,
+				)},
+			)
+			return "", "", out
+		}
+	}
 	return agentName, resolution.ModelForSelectedAgent(agentName, in.requestedModel), nil
 }
 

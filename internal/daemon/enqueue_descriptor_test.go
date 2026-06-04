@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/roborev/internal/agent"
 	"go.kenn.io/roborev/internal/storage"
 	"go.kenn.io/roborev/internal/testutil"
 )
@@ -181,6 +182,149 @@ func TestEnqueueResponseUnchanged(t *testing.T) {
 	assert.Positive(t, job.ID)
 	assert.Equal(t, "test", job.Agent)
 	assert.Equal(t, storage.JobStatusQueued, job.Status)
+}
+
+// TestEnqueueCodeReviewPreservesOutputPrefix guards a regression seen in the
+// TUI agent-picker rerun flow: code-review descriptors (single-commit, range,
+// dirty) used to drop req.OutputPrefix on the floor because only
+// descriptorForPrompt copied it through. The picker re-enqueues with the
+// original job's output_prefix to preserve panel-member prefixing across
+// agent switches, so the persisted job must carry the prefix forward.
+func TestEnqueueCodeReviewPreservesOutputPrefix(t *testing.T) {
+	t.Run("single-commit", func(t *testing.T) {
+		server, db, _ := newTestServer(t)
+		repo := testutil.NewGitRepo(t)
+		repo.CommitFile("a.txt", "a", "add a")
+
+		job := enqueueViaHTTP(t, server, EnqueueRequest{
+			RepoPath:     repo.Path(),
+			GitRef:       "HEAD",
+			Agent:        "test",
+			OutputPrefix: "[member-3] ",
+		})
+
+		claimed, err := db.ClaimJob("worker")
+		require.NoError(t, err)
+		require.Equal(t, job.ID, claimed.ID)
+		assert.Equal(t, "[member-3] ", claimed.OutputPrefix,
+			"single-commit review must preserve OutputPrefix end-to-end")
+	})
+
+	t.Run("range", func(t *testing.T) {
+		server, db, _ := newTestServer(t)
+		repo := testutil.NewGitRepo(t)
+		repo.CommitFile("a.txt", "a", "add a")
+		repo.CommitFile("b.txt", "b", "add b")
+
+		job := enqueueViaHTTP(t, server, EnqueueRequest{
+			RepoPath:     repo.Path(),
+			GitRef:       "HEAD~1..HEAD",
+			Agent:        "test",
+			OutputPrefix: "[member-3] ",
+		})
+
+		claimed, err := db.ClaimJob("worker")
+		require.NoError(t, err)
+		require.Equal(t, job.ID, claimed.ID)
+		assert.Equal(t, "[member-3] ", claimed.OutputPrefix,
+			"range review must preserve OutputPrefix end-to-end")
+	})
+
+	t.Run("dirty", func(t *testing.T) {
+		server, db, _ := newTestServer(t)
+		repo := testutil.NewGitRepo(t)
+		repo.CommitFile("a.txt", "a", "add a")
+
+		job := enqueueViaHTTP(t, server, EnqueueRequest{
+			RepoPath:     repo.Path(),
+			GitRef:       "dirty",
+			Agent:        "test",
+			DiffContent:  "diff --git a/x b/x\n+change\n",
+			OutputPrefix: "[member-3] ",
+		})
+
+		claimed, err := db.ClaimJob("worker")
+		require.NoError(t, err)
+		require.Equal(t, job.ID, claimed.ID)
+		assert.Equal(t, "[member-3] ", claimed.OutputPrefix,
+			"dirty review must preserve OutputPrefix end-to-end")
+	})
+}
+
+// TestEnqueueStrictAgentRejectsUnavailable guards the TUI agent-picker
+// contract: when strict_agent=true and the requested agent is not actually
+// available (e.g. unregistered, uninstalled, or overridden by workflow
+// config), /api/enqueue must 400 rather than silently fall back to a
+// different agent. The picker is an explicit-agent UX; receiving a
+// substituted agent without notice would defeat the whole point.
+func TestEnqueueStrictAgentRejectsUnavailable(t *testing.T) {
+	// Make the test independent of the host's installed CLIs. The agent
+	// registry is package-global, so:
+	//   1. Override "pi" with an unavailableSynthesisCommandAgent whose
+	//      command name is a fixed token that can never be on PATH —
+	//      IsAvailable("pi") deterministically returns false regardless
+	//      of whether the dev/CI box has a pi binary.
+	//   2. Override "codex" (fallback rank 1) with a FakeAgent so the
+	//      fallback chain has at least one always-available agent and
+	//      the daemon doesn't 503 before reaching the strict-agent gate.
+	//   3. Restore both originals via t.Cleanup so other tests in the
+	//      package see normal registry state.
+	originalPi, err := agent.Get("pi")
+	require.NoError(t, err, "pi must be a known agent")
+	agent.Register(&unavailableSynthesisCommandAgent{
+		name: "pi", command: "test-pi-not-on-path-d9e7c1b3",
+	})
+	t.Cleanup(func() { agent.Register(originalPi) })
+
+	originalCodex, err := agent.Get("codex")
+	require.NoError(t, err, "codex must be a known agent")
+	agent.Register(&agent.FakeAgent{NameStr: "codex"})
+	t.Cleanup(func() { agent.Register(originalCodex) })
+
+	server, db, _ := newTestServer(t)
+
+	repo := testutil.NewGitRepo(t)
+	repo.CommitFile("a.txt", "a", "add a")
+
+	req := testutil.MakeJSONRequest(t, http.MethodPost, "/api/enqueue", EnqueueRequest{
+		RepoPath:    repo.Path(),
+		GitRef:      "HEAD",
+		Agent:       "pi",
+		StrictAgent: true,
+	})
+	w := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "unavailable",
+		"error must explain why the agent was rejected")
+	assert.Contains(t, w.Body.String(), "pi",
+		"error should name the rejected agent so the user knows what to fix")
+
+	jobs, err := db.ListJobs("", "", 100, 0)
+	require.NoError(t, err)
+	assert.Empty(t, jobs, "strict-agent rejection must not create a job")
+}
+
+// TestEnqueueStrictAgentAllowsHonoredAgent ensures strict_agent isn't a hammer:
+// when the requested agent IS available, enqueue proceeds normally.
+func TestEnqueueStrictAgentAllowsHonoredAgent(t *testing.T) {
+	server, db, _ := newTestServer(t)
+
+	repo := testutil.NewGitRepo(t)
+	repo.CommitFile("a.txt", "a", "add a")
+
+	job := enqueueViaHTTP(t, server, EnqueueRequest{
+		RepoPath:    repo.Path(),
+		GitRef:      "HEAD",
+		Agent:       "test",
+		StrictAgent: true,
+	})
+
+	stored, err := db.GetJobByID(job.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "test", stored.Agent,
+		"strict_agent with an available agent must persist exactly that agent")
 }
 
 // TestEnqueueExcludedCommitSkips pins the single-commit skip path: when the HEAD

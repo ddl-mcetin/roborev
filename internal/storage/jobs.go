@@ -1021,7 +1021,7 @@ func (db *DB) ListJobs(statusFilter string, repoFilter string, limit, offset int
 		       rv.verdict_bool, j.source_machine_id, j.uuid, j.model, j.job_type, j.review_type, j.patch_id,
 		       j.parent_job_id, j.provider, j.requested_model, j.requested_provider, j.token_usage, COALESCE(j.worktree_path, ''),
 		       j.command_line, COALESCE(j.min_severity, ''), COALESCE(j.backup_agent, ''), COALESCE(j.backup_model, ''),
-		       COALESCE(j.skip_reason, ''), COALESCE(j.source, ''),
+		       COALESCE(j.skip_reason, ''), COALESCE(j.source, ''), COALESCE(j.output_prefix, ''),
 		       COALESCE(j.panel_run_uuid, ''), COALESCE(j.panel_role, ''), COALESCE(j.panel_name, ''), COALESCE(j.panel_member_name, ''), j.panel_member_index, COALESCE(j.panel_member_config_json, ''), COALESCE(j.claim_blocked, 0)
 		FROM review_jobs j
 		JOIN repos r ON r.id = j.repo_id
@@ -1062,7 +1062,7 @@ func (db *DB) ListJobs(statusFilter string, repoFilter string, limit, offset int
 			&verdictBool, &fields.SourceMachineID, &fields.UUID, &fields.Model, &fields.JobType, &fields.ReviewType, &fields.PatchID,
 			&fields.ParentJobID, &fields.Provider, &fields.RequestedModel, &fields.RequestedProvider, &fields.TokenUsage, &fields.WorktreePath,
 			&fields.CommandLine, &fields.MinSeverity, &fields.BackupAgent, &fields.BackupModel,
-			&fields.SkipReason, &fields.Source,
+			&fields.SkipReason, &fields.Source, &fields.OutputPrefix,
 			&fields.PanelRunUUID, &fields.PanelRole, &fields.PanelName, &fields.PanelMemberName, &fields.PanelMemberIndex, &fields.PanelMemberConfig, &fields.ClaimBlocked)
 		if err != nil {
 			return nil, err
